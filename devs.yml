@@ -1,0 +1,7 @@
+devices:
+  - name: CY8CKIT-062S2-AI
+    uid: 1106035A012D2400
+  - name: CY8CKIT-062S2-AI
+    uid: 0D170C5A012D2400
+  - name: XMC1100_BOOT_KIT
+    uid: 000591128721

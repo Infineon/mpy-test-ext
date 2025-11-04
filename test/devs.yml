@@ -1,0 +1,18 @@
+# This is just an example file showing how to define devices for testing.
+
+- name: CY8CKIT-062S2-AI #human-readable-name (description, name, etc)
+  uid: 1106035A012D2400
+  features:
+    - 0.1.0.a
+
+- name: CY8CKIT-062S2-AI
+  uid: 0D170C5A012D2400
+  #features:
+    #- i2c_master_in_pins_P12_P13_2_1 # We can add here any feature to filter out the device.
+
+- name: XMC1100_BOOT_KIT
+  uid: 000591128721
+  features: 
+    - spi_ping_pong_multiple_boards_master_1_1
+    - i2c_master_loop_2_1
+      # This feature can grow into richer and more feature and complex dictionaries are required. Currently it is just a list of strings.

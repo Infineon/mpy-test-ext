@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from serial.tools.list_ports import comports
 from uhubctl import Uhubctl
 import yaml
@@ -51,7 +51,6 @@ class DevSwitch:
 
     @classmethod
     def create_from_uid(cls, uid: str) -> "DevSwitch":
-        
         hub, port = cls.hw_controller.get_hub_port_by_desc(uid)
         
         if hub and port:
@@ -61,7 +60,6 @@ class DevSwitch:
     
     @classmethod
     def scan(cls) -> list["DevSwitch"]:
-        
         hub_port = cls.hw_controller.scan_hubs_ports()
         
         switch_list = []
@@ -73,7 +71,7 @@ class DevSwitch:
 @dataclass
 class DevAccessSerial:
 
-    address: str
+    address: str = None
     # TODO: Add additional requirements for accessibility:
     #     #       - the device is not busy (fuser or such as in makersHIL)
 
@@ -91,15 +89,16 @@ class DevAccessSerial:
 @dataclass
 class Device:
 
-    name: str
-    uid: str
-    features: list[str]
+    name: str = ""
+    uid: str = ""
+    features: list[str] = field(default_factory=list)
     access: DevAccessSerial = None
     switch: DevSwitch = None
 
     def __post_init__(self):
-        self.access = DevAccessSerial.create_from_uid(self.uid)
-        self.switch = DevSwitch.create_from_uid(self.uid)
+        if self.uid != "":
+            self.access = DevAccessSerial.create_from_uid(self.uid)
+            self.switch = DevSwitch.create_from_uid(self.uid)
 
     @classmethod
     def load_device_list_from_yml(cls, devs_yml_file: str) -> list["Device"]:

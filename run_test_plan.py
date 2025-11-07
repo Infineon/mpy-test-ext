@@ -8,8 +8,9 @@ import subprocess
 import yaml
 import time
 
-from get_devs import get_devices_port
 
+#from get_devs import get_devices_port
+from devs import Device, DevAccessSerial
 
 class TestRunner:
     """
@@ -286,7 +287,6 @@ class TestRunner:
     def __run_single_post_delay_test(self, dut_port: str) -> int:
         """
         Run single tests with a delay between each test.
-
         """
 
         def get_test_list_args():
@@ -673,14 +673,15 @@ class TestPlanRunner(ABC):
 
         while pending_retries:
             for test in test_list:
-                dut_port, stub_port = self.get_test_device_ports(test)
+                dut_dev, stub_dev = self.get_test_devs(test)
+                dut_port, stub_port = TestPlanRunner.__get_test_ports(dut_dev, stub_dev)
 
                 if not test.are_supported_devs_available(dut_port, stub_port):
                     test_results.register_skip(test.name)
                     self.logger.test_skip_info(test.name)
                     continue
 
-                # TODO: Add device.switch management.
+                TestPlanRunner.__reset_switchable_devs(dut_dev, stub_dev)
 
                 self.logger.test_info(test.name, dut_port, stub_port)
                 ret_code = test.run(dut_port, stub_port)
@@ -733,15 +734,47 @@ class TestPlanRunner(ABC):
 
         return test_list
 
-    @abstractmethod
-    def get_test_device_ports(self, test: TestRunner) -> tuple[str, str]:
+    @staticmethod
+    def __reset_switchable_devs(dut_dev: Device, stub_dev: Device) -> None:
         """
-        Abstract method to get the test device ports for the given test.
-        This method must be implemented by the derived classes.
-        It should return a tuple of (dut_port, stub_port).
+        Reset the given devices.
+        If a device has a switch, it uses the switch to reset the device.
         """
-        return None, None
+        devs_to_reset = [dut_dev, stub_dev]
+        for dev in devs_to_reset:
+            if dev.switch:
+                dev.switch.reset()
+                timeout = 0
+                while not dev.switch.status() == "on connected" and timeout < 5:
+                    time.sleep(1)
+                    timeout += 1
 
+    @staticmethod
+    def __get_test_ports(dut_dev: Device, stub_dev: Device) -> tuple[str, str]:
+        """
+        Get the test device ports from the given devices.
+        If a device has an access method, it returns the address of the access.
+        Otherwise, it returns None.
+        """
+        dut_port = None
+        stub_port = None
+
+        if dut_dev.access:
+            dut_port = dut_dev.access.get_address()
+
+        if stub_dev.access:
+            stub_port = stub_dev.access.get_address()
+
+        return dut_port, stub_port
+
+    @abstractmethod
+    def get_test_devs(self, test: TestRunner) -> tuple[Device, Device]:
+        """
+        Abstract method to get the test devices for the given test.
+        This method must be implemented by the derived classes.
+        It should return a tuple of (dut_dev, stub_dev).
+        """
+        return Device(), Device()
 
 class TestPlanRunnerHIL(TestPlanRunner):
     """
@@ -774,55 +807,63 @@ class TestPlanRunnerHIL(TestPlanRunner):
     Private methods
     """
 
-    def get_test_device_ports(self, test: TestRunner) -> tuple[str, str]:
+    def get_test_devs(self, test: TestRunner) -> tuple[Device, Device]:
         """
-        Get the test device ports for the given test.
-        It uses the HIL devices file and the board name to find the appropriate ports.
-        Returns a tuple of (dut_port, stub_port).
+        Get the test devices for the given test.
+        It uses the HIL devices file and the board name to find the appropriate devices.
+        Returns a tuple of (dut_dev, stub_dev).
 
         If multiple test devices are available for the given role, it takes the first one for DUT
         and any other for the STUB.
         """
-        dut_port = None
-        stub_port = None
+        dut_dev = Device()
+        stub_dev = Device()
 
-        dut_port_list = self.__get_ports_for_role(test, self.board, TestRunner.DeviceRole.DUT)
+        dut_dev_list = self.__get_devs_for_role(test, self.board, TestRunner.DeviceRole.DUT)
 
-        if not dut_port_list:
-            return dut_port, stub_port
+        if not dut_dev_list:
+            return dut_dev, stub_dev
 
-        dut_port = dut_port_list[0]  # Take the first
+        for dev in dut_dev_list:
+            if dev.access: 
+                dut_dev = dev  # Take the first accessible
+                break
+        
+        if not dut_dev.access:
+            return dut_dev, stub_dev
 
         if test.requires_multiple_devs():
-            stub_port_list = self.__get_ports_for_role(
+            stub_dev_list = self.__get_devs_for_role(
                 test, self.board, TestRunner.DeviceRole.STUB
             )
 
-            for port in stub_port_list:
-                # Take any element from stub_port_list that is not dut_port
-                if port != dut_port:
-                    stub_port = port
-                    break
+            for dev in stub_dev_list:
+                if dev.access:
+                    # Take any element from stub_port_list that is not dut_port
+                    if dev.access.get_address() != dut_dev.access.get_address():
+                        stub_dev = dev
+                        break
 
-        return dut_port, stub_port
+        return dut_dev, stub_dev
 
-    def __get_ports_for_role(
+    def __get_devs_for_role(
         self, test: TestRunner, board: str, device_role: TestRunner.DeviceRole
-    ) -> list[str]:
+    ) -> list[Device]:
         """
-        Get the list of ports for the given device role (dut or stub) and board.
-        It uses the HIL devices file to find the available ports.
+        Get the list of devices for the given device role (dut or stub) and board.
+        It uses the HIL devices file to find the available matching devices.
         """
         supported_dev_list = test.get_supported_dev_list(device_role, board)
 
-        port_list = []
-        for device in supported_dev_list:
-            available_ports = get_devices_port(
-                device.get("board"), self.hil_devs_file, device.get("version", None)
-            )
-            port_list.extend(available_ports)
+        dev_list = []
+        for supported_dev in supported_dev_list:
+            available_devs = Device.load_device_list_from_yml(self.hil_devs_file)
+            for dev in available_devs:
+                if dev.name == supported_dev.get("board"):
+                    if supported_dev.get("version") is None or supported_dev.get("version") in dev.features:
+                        dev_list.append(dev)
 
-        return port_list
+        return dev_list
 
 
 class TestPlanRunnerPorts(TestPlanRunner):
@@ -858,12 +899,14 @@ class TestPlanRunnerPorts(TestPlanRunner):
     Private methods
     """
 
-    def get_test_device_ports(self, test: TestRunner) -> tuple[str, str]:
+    def get_test_devs(self, test: TestRunner) -> tuple[Device, Device]:
         """
         Get the test device ports for the given test.
         It returns the ports set in the instance.
         """
-        return self.dut_port, self.stub_port
+        dev_dut = Device(access=DevAccessSerial(address=self.dut_port)) 
+        dev_stub = Device(access=DevAccessSerial(address=self.stub_port))
+        return dev_dut, dev_stub    
 
 
 class TestPlanRunnerCLI:

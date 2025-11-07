@@ -99,6 +99,11 @@ class Uhubctl:
         this is not considered an error. A USB hub may not be
         connected or available.
 
+        If uhubctl is not installed, it silently returns an empty output.
+        This enables compatibility with systems where uhubctl is not
+        available.
+        Otherwise, it prints the stderror message.
+
         Args:
             cmd_args: List of command-line arguments for uhubctl
         
@@ -106,9 +111,17 @@ class Uhubctl:
             The standard output from the uhubctl command as a string.
             An empty string if no devices are detected or an error occurs.
         """
-        uhub_cmd = ["uhubctl"] + cmd_args
-        uhub_proc = subprocess.run(uhub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        uhub_err = uhub_proc.stderr.decode('utf-8')
+        try:
+            uhub_cmd = ["uhubctl"] + cmd_args
+            uhub_proc = subprocess.run(uhub_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            uhub_err = uhub_proc.stderr.decode('utf-8')
+        except Exception as e:
+            uhubctl_not_installed_error = "[Errno 2] No such file or directory: 'uhubctl'"
+            if not uhubctl_not_installed_error in str(e):
+                print(f"error: unable to run uhubctl command '{cmd_args}': {e}")
+                
+            self.last_cmd_output = ""
+            return
 
         if uhub_proc.returncode != 0:
             if not Uhubctl.__are_devices_detected(uhub_err):  

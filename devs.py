@@ -84,7 +84,28 @@ class DevAccessSerial:
             if port.serial_number == uid:
                 return cls(address=port.device)
         
-        return None   
+        return None
+    
+    @classmethod
+    def scan(cls, attr_name: str = None , attr_value: str = None) -> list["DevAccessSerial"]:
+        """
+        Scan serial devices and return access objects.
+        If attr_name and attr_value are provided, filter the devices accordingly.
+        Args:
+            attr_name (str): Attribute name to filter by.
+            attr_value (str): Attribute value to filter by.
+        Returns:
+            list[DevAccessSerial]: List of DevAccessSerial objects.
+        """
+        access_list = []
+        for port in comports():
+            if attr_name is None:
+                access_list.append(cls(address=port.device))
+            else:
+                if hasattr(port, attr_name) and getattr(port, attr_name) == attr_value:
+                     access_list.append(cls(address=port.device))
+        
+        return access_list
     
 @dataclass
 class Device:

@@ -72,38 +72,33 @@ class DevSwitch:
 class DevAccessSerial:
 
     address: str = None
+    serial_number: str = None
     # TODO: Add additional requirements for accessibility:
     #     #       - the device is not busy (fuser or such as in makersHIL)
 
     def get_address(self) -> str:
         return self.address
+   
+    def get_serial_number(self) -> str:
+        return self.serial_number
 
     @classmethod
     def create_from_uid(cls, uid: str) -> "DevAccessSerial":
         for port in comports():
             if port.serial_number == uid:
-                return cls(address=port.device)
+                return cls(address=port.device, serial_number=port.serial_number)
         
         return None
     
     @classmethod
     def scan(cls, attr_name: str = None , attr_value: str = None) -> list["DevAccessSerial"]:
-        """
-        Scan serial devices and return access objects.
-        If attr_name and attr_value are provided, filter the devices accordingly.
-        Args:
-            attr_name (str): Attribute name to filter by.
-            attr_value (str): Attribute value to filter by.
-        Returns:
-            list[DevAccessSerial]: List of DevAccessSerial objects.
-        """
         access_list = []
         for port in comports():
             if attr_name is None:
-                access_list.append(cls(address=port.device))
+                access_list.append(cls(address=port.device, serial_number=port.serial_number))
             else:
-                if hasattr(port, attr_name) and getattr(port, attr_name) == attr_value:
-                     access_list.append(cls(address=port.device))
+                if hasattr(port, attr_name) and attr_value == getattr(port, attr_name):
+                     access_list.append(cls(address=port.device, serial_number=port.serial_number))
         
         return access_list
     

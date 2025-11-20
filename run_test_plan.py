@@ -642,6 +642,11 @@ class TestPlanLogger:
             + f"{TestPlanLogger.color_off}"
         )
 
+    def dev_switch_info(self) -> None:
+        print(
+            f"{TestPlanLogger.magenta_on}Switchable device performing power cycle :) :) :){TestPlanLogger.color_off}"
+        )
+
 
 class TestPlanRunner(ABC):
     """
@@ -679,7 +684,7 @@ class TestPlanRunner(ABC):
                     self.logger.test_skip_info(test.name)
                     continue
 
-                TestPlanRunner.__reset_switchable_devs(dut_dev, stub_dev)
+                TestPlanRunner.__reset_switchable_devs(self, dut_dev, stub_dev)
 
                 self.logger.test_info(test.name, dut_port, stub_port)
                 ret_code = test.run(dut_port, stub_port)
@@ -732,8 +737,8 @@ class TestPlanRunner(ABC):
 
         return test_list
 
-    @staticmethod
-    def __reset_switchable_devs(dut_dev: Device, stub_dev: Device) -> None:
+    # @staticmethod
+    def __reset_switchable_devs(self, dut_dev: Device, stub_dev: Device) -> None:
         """
         Reset the given devices.
         If a device has a switch, it uses the switch to reset the device.
@@ -741,6 +746,7 @@ class TestPlanRunner(ABC):
         devs_to_reset = [dut_dev, stub_dev]
         for dev in devs_to_reset:
             if dev.switch:
+                self.logger.dev_switch_info()
                 dev.switch.reset()
                 timeout = 0
                 while not dev.switch.status() == "on connected" and timeout < 5:

@@ -642,7 +642,6 @@ class TestPlanLogger:
             + f"{TestPlanLogger.color_off}"
         )
 
-
 class TestPlanRunner(ABC):
     """
     This class takes care of running a test plan.
@@ -679,12 +678,11 @@ class TestPlanRunner(ABC):
                     self.logger.test_skip_info(test.name)
                     continue
 
-                TestPlanRunner.__reset_switchable_devs(dut_dev, stub_dev)
-
                 self.logger.test_info(test.name, dut_port, stub_port)
                 ret_code = test.run(dut_port, stub_port)
 
                 if ret_code != 0:
+                    TestPlanRunner.__reset_switchable_devs(dut_dev, stub_dev)   
                     test_results.register_fail(test.name)
                     self.logger.test_fail_info(test.name)
                 else:
@@ -746,6 +744,9 @@ class TestPlanRunner(ABC):
                 while not dev.switch.status() == "on connected" and timeout < 5:
                     time.sleep(1)
                     timeout += 1
+                # Extra time for MicroPython to be ready
+                # Value chosen experimentally
+                time.sleep(2)
 
     @staticmethod
     def __get_test_ports(dut_dev: Device, stub_dev: Device) -> tuple[str, str]:

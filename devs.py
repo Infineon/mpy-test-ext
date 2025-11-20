@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from serial.tools.list_ports import comports
 from uhubctl import Uhubctl
 import yaml
@@ -51,7 +51,6 @@ class DevSwitch:
 
     @classmethod
     def create_from_uid(cls, uid: str) -> "DevSwitch":
-        
         hub, port = cls.hw_controller.get_hub_port_by_desc(uid)
         
         if hub and port:
@@ -61,7 +60,6 @@ class DevSwitch:
     
     @classmethod
     def scan(cls) -> list["DevSwitch"]:
-        
         hub_port = cls.hw_controller.scan_hubs_ports()
         
         switch_list = []
@@ -73,33 +71,50 @@ class DevSwitch:
 @dataclass
 class DevAccessSerial:
 
-    address: str
+    address: str = None
+    serial_number: str = None
     # TODO: Add additional requirements for accessibility:
     #     #       - the device is not busy (fuser or such as in makersHIL)
 
     def get_address(self) -> str:
         return self.address
+   
+    def get_serial_number(self) -> str:
+        return self.serial_number
 
     @classmethod
     def create_from_uid(cls, uid: str) -> "DevAccessSerial":
         for port in comports():
             if port.serial_number == uid:
-                return cls(address=port.device)
+                return cls(address=port.device, serial_number=port.serial_number)
         
-        return None   
+        return None
+    
+    @classmethod
+    def scan(cls, attr_name: str = None , attr_value: str = None) -> list["DevAccessSerial"]:
+        access_list = []
+        for port in comports():
+            if attr_name is None:
+                access_list.append(cls(address=port.device, serial_number=port.serial_number))
+            else:
+                if hasattr(port, attr_name) and attr_value == getattr(port, attr_name):
+                     access_list.append(cls(address=port.device, serial_number=port.serial_number))
+        
+        return access_list
     
 @dataclass
 class Device:
 
-    name: str
-    uid: str
-    features: list[str]
+    name: str = ""
+    uid: str = ""
+    features: list[str] = field(default_factory=list)
     access: DevAccessSerial = None
     switch: DevSwitch = None
 
     def __post_init__(self):
-        self.access = DevAccessSerial.create_from_uid(self.uid)
-        self.switch = DevSwitch.create_from_uid(self.uid)
+        if self.uid != "":
+            self.access = DevAccessSerial.create_from_uid(self.uid)
+            self.switch = DevSwitch.create_from_uid(self.uid)
 
     @classmethod
     def load_device_list_from_yml(cls, devs_yml_file: str) -> list["Device"]:

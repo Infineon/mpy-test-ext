@@ -3,17 +3,30 @@ from dataclasses import dataclass
 from devs import Device, DevAccessSerial, DevSwitch
 
 class ObjectAttrQuerier: 
+    """
+    A utility class to query attributes from an object, including nested objects.
+    It supports exact and partial matching, as well as filtering based on multiple criteria.
+    """
 
     @dataclass
     class AttrQueryFilter:
+        """
+        A data class to represent a filter for attribute querying.
+        """
         attr_key: str
         attr_value: str = None
         exact: bool = True
 
     def __init__(self, obj):
+        """
+        Initialize the ObjectAttrQuerier with the target object.
+        """
         self.obj = obj
     
     def query(self, attr_key: str, attr_value: str = None, exact: bool = True) -> object:
+        """
+        Query the attribute of the object.  
+        If attr_value is provided, it checks for exact or partial match based on the 'exact' flag."""
         if attr_value:
             if exact:
                 return (attr_value if self.__query_exact(attr_key, attr_value) else None)
@@ -23,6 +36,10 @@ class ObjectAttrQuerier:
             return self.__query_attr(attr_key)
         
     def query_deep(self, attr_key: str, attr_value: str = None, exact: bool = True) -> object:
+        """
+        Deep query the attribute of the object, including nested objects.
+        If attr_value is provided, it checks for exact or partial match based on the 'exact' flag.
+        """
         found_attr_value = self.query(attr_key, attr_value, exact)
 
         if not found_attr_value:
@@ -37,7 +54,10 @@ class ObjectAttrQuerier:
         return found_attr_value
 
     def query_filtered(self, attr_key, query_filter_list: list[AttrQueryFilter], deep: bool = False) -> object:
-        
+        """
+        Query the attribute of the object with multiple filters.
+        If deep is True, it performs a deep query.
+        """
         query_func = self.query_deep if deep else self.query
 
         attr_value = query_func(attr_key)
@@ -53,6 +73,9 @@ class ObjectAttrQuerier:
     
     @staticmethod
     def query_list(obj_list: list[object], attr_key, query_filter_list: list[AttrQueryFilter] = [], deep: bool = False) -> list[object]:
+        """
+        Query a list of objects for a specific attribute with optional filters.
+        If deep is True, it performs a deep query."""
         query_list = []
         for obj in obj_list:
             obj = ObjectAttrQuerier(obj)
@@ -66,18 +89,27 @@ class ObjectAttrQuerier:
     Private methods     
     """
     def __query_attr(self, query_attr: str) -> object:
+        """
+        Query the attribute of the object.
+        """
         if hasattr(self.obj, query_attr):
             return getattr(self.obj, query_attr)
         
         return None
     
     def __query_exact(self, query_attr: str, query_value: str) -> bool:
+        """
+        Check if the attribute of the object matches exactly the query value.
+        """
         if hasattr(self.obj, query_attr):
             return getattr(self.obj, query_attr) == query_value
         
         return False
     
     def __query_contains(self, query_attr: str, query_value: str) -> bool:
+        """
+        Check if the attribute of the object contains the query value.
+        """
         if hasattr(self.obj, query_attr):
             attr_value = getattr(self.obj, query_attr)
             if isinstance(attr_value, str):
@@ -86,7 +118,10 @@ class ObjectAttrQuerier:
         return False
 
 class DevsQueryCLI:
-
+    """
+    A command-line interface (CLI) for querying device attributes using ObjectAttrQuerier.
+    The allowed device objects are Device, DevAccessSerial, and DevSwitch.
+    """
     def __init__(self):
 
         self.allowed_dev_objs = [Device, DevAccessSerial, DevSwitch] 
@@ -98,12 +133,18 @@ class DevsQueryCLI:
         self.parser.add_argument("--not-connected", default=False, action="store_true", help="Include also NOT connected devices from the device list. Only relevant when using --devs-yml")
 
     def parse(self) -> argparse.Namespace:
+        """
+        Parse and validate the command-line arguments.
+        """
         args = self.parser.parse_args()
         self.__set_validate_args(args)
         return args
     
     def __get_query_choices(self) -> list[str]:
-
+        """
+        Get the list of possible attribute names from the allowed device objects.
+        The valid attributes are those with string or integer types.
+        """
         def get_obj_attributes(obj):
             attr_list = []
             for attr in dir(obj):
@@ -128,7 +169,12 @@ class DevsQueryCLI:
         return choices
     
     def __set_validate_args(self, args: argparse.Namespace) -> argparse.Namespace:
-
+        """
+        Validate and set the command-line arguments.
+        The filters must be in the format 'attribute=value'.
+        As the CLI allows multiple -f options and the append action, it flatten
+        the list of lists into a single list.
+        """
         if args.filter:
             simple_filter_list = []
             for filter in args.filter:
@@ -143,6 +189,10 @@ class DevsQueryCLI:
                     self.parser.error("filter must be in format 'attribute=value'")
 
     def parse_filters(self, filter_str_list: list[str]) -> list[ObjectAttrQuerier.AttrQueryFilter]:
+        """
+        Parse the filter strings into a list of AttrQueryFilter objects.
+        Each filter string must be in the format 'attribute=value'.
+        """
         filter_list = []
         for filter_str in filter_str_list:
 
@@ -153,6 +203,14 @@ class DevsQueryCLI:
             
 
 def main_devs_query_cli() -> list[str]:
+    """
+    Main function for the DevsQueryCLI.
+    It parses the command-line arguments, loads the device list,
+    applies the queries and filters, and prints the results.
+
+    If a device YAML file is provided, it loads the device list from the file.
+    Otherwise, it scans for connected serial devices.
+    """
     cli = DevsQueryCLI()
     args = cli.parse()
 

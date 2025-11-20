@@ -8,8 +8,6 @@ import subprocess
 import yaml
 import time
 
-
-#from get_devs import get_devices_port
 from devs import Device, DevAccessSerial
 
 class TestRunner:

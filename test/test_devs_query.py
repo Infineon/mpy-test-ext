@@ -1,3 +1,12 @@
+"""
+This is a basic during development test for the ObjectAttrQuerier class.
+It is not meant as a formal and thorough unit and coverage testing.
+It just exercises the main functionalities of the class in 
+a sunny-day testing approach.
+
+In it we create a couple of Device and DevAccessSerial objects
+and use them to test the querying functionalities of the ObjectAttrQuerier class.
+"""
 import sys
 
 sys.path.append('..')

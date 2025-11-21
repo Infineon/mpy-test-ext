@@ -752,6 +752,9 @@ class TestPlanRunner(ABC):
                 while not dev.switch.status() == "on connected" and timeout < 5:
                     time.sleep(1)
                     timeout += 1
+                # Extra time for MicroPython to be ready
+                # Value chosen experimentally
+                time.sleep(2)
 
     @staticmethod
     def __get_test_ports(dut_dev: Device, stub_dev: Device) -> tuple[str, str]:

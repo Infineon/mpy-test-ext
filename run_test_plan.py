@@ -8,7 +8,7 @@ import subprocess
 import yaml
 import time
 
-from devs import Device, DevAccessSerial
+from etdevs.devs import Device, DevAccessSerial
 
 class TestRunner:
     """

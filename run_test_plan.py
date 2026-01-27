@@ -32,8 +32,8 @@ class TestRunner:
         test_exclude_list: list[str] = [],
         post_test_delay_ms: int = 0,
         stub_script: str = None,
-        supported_dut_dev_list: list[dict] = [],
-        supported_stub_dev_list: list[dict] = [],
+        supported_dut_dev_list: list[Device] = [],
+        supported_stub_dev_list: list[Device] = [],
         post_stub_delay_ms: int = 0,
         test_type: str = None,
         custom_args: list[str] = [],
@@ -857,9 +857,25 @@ class TestPlanRunnerHIL(TestPlanRunner):
         dev_list = []
         for supported_dev in supported_dev_list:
             available_devs = Device.load_device_list_from_yml(self.hil_devs_file)
+
             for dev in available_devs:
                 if dev.name == supported_dev.get("board"):
-                    if supported_dev.get("version") is None or supported_dev.get("version") in dev.features:
+                    # Check version match (if specified)
+                    version_match = (
+                        supported_dev.get("version") is None or 
+                        supported_dev.get("version") in dev.features
+                    )
+                    
+                    # Check features subset (if specified)
+                    required_features = supported_dev.get("features") if supported_dev.get("features") else []
+                    required_features = set(required_features)
+                    available_features = dev.features if dev.features else []
+                    available_features = set(available_features)
+                    features_match = required_features.issubset(available_features)
+
+                    # Add device only if both version and features match
+                    if version_match and features_match:
+
                         dev_list.append(dev)
 
         return dev_list

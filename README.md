@@ -138,6 +138,12 @@ Test plans are YAML files that define collections of tests to be executed. They 
       - board: CY8CPROTO-063-BLE
 ```
 
+Before tests start, the runner performs a global device preflight and ensures
+`unittest` is available on all target devices participating in the run.
+For each device, the runner checks `import unittest` first and installs
+`unittest` on demand via `mpremote mip install unittest` only if missing.
+This check/install sequence runs at most once per device for a given execution.
+
 ### HIL Device Configuration
 
 Hardware-in-the-loop testing requires a device configuration file that maps board types to available physical devices:

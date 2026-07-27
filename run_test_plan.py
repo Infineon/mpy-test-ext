@@ -656,6 +656,7 @@ class TestPlanRunner(ABC):
         """
         self.test_plan_file = test_plan_file
         self.logger = TestPlanLogger()
+        self.completed_requirements = set()
 
     def run(self, test_name_list: list[str] = [], max_retries: int = 0) -> int:
         """
@@ -665,6 +666,10 @@ class TestPlanRunner(ABC):
         If there are failed tests after all retries, the script exits with code 1.
         """
         test_list = self.__get_test_list(test_name_list)
+        ret_code = self.__prepare_common_prerequisites(test_list)
+        if ret_code != 0:
+            sys.exit(1)
+
         test_results = TestPlanResults(max_retries)
         pending_retries = True
 
@@ -729,6 +734,62 @@ class TestPlanRunner(ABC):
                     test_list.append(test)
 
         return test_list
+
+    def __prepare_common_prerequisites(self, test_list: list[TestRunner]) -> int:
+        """
+        Ensure common prerequisites are available on all target ports before test execution.
+        """
+        ports = self.get_prerequisite_ports(test_list)
+        # Keep order but remove duplicates/empties.
+        ports = [p for p in dict.fromkeys(ports) if p]
+
+        if not ports:
+            return 0
+
+        for port in ports:
+            requirement_key = (port, "unittest")
+            if requirement_key in self.completed_requirements:
+                continue
+
+            ret_code = TestPlanRunner.__ensure_unittest(port)
+            if ret_code != 0:
+                return ret_code
+
+            self.completed_requirements.add(requirement_key)
+
+        return 0
+
+    @staticmethod
+    def __ensure_unittest(port: str) -> int:
+        """
+        Install unittest on the device if it is not already available.
+        """
+        mpy_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        mpremote_py = os.path.join(mpy_root_dir, "tools", "mpremote", "mpremote.py")
+        check_cmd = [mpremote_py, "connect", port, "exec", "import unittest"]
+        check_proc = subprocess.run(check_cmd, capture_output=True, text=True)
+        if check_proc.returncode == 0:
+            return 0
+
+        print(f"info: installing unittest on {port}")
+        install_cmd = [mpremote_py, "connect", port, "mip", "install", "unittest"]
+        install_proc = subprocess.run(install_cmd)
+        if install_proc.returncode != 0:
+            return install_proc.returncode
+
+        verify_proc = subprocess.run(check_cmd, capture_output=True, text=True)
+        if verify_proc.returncode != 0:
+            print(f"error: unittest installation verification failed on {port}")
+            return verify_proc.returncode
+
+        return 0
+
+    @abstractmethod
+    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
+        """
+        Return all target ports that should receive common prerequisites.
+        """
+        return []
 
     @staticmethod
     def __reset_switchable_devs(dut_dev: Device, stub_dev: Device) -> None:
@@ -880,6 +941,21 @@ class TestPlanRunnerHIL(TestPlanRunner):
 
         return dev_list
 
+    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
+        """
+        Return serial ports for all available devices matching the selected board.
+        """
+        ports = []
+        available_devs = Device.load_device_list_from_yml(self.hil_devs_file)
+        for dev in available_devs:
+            if self.board is not None and dev.name != self.board:
+                continue
+
+            if dev.access:
+                ports.append(dev.access.get_address())
+
+        return ports
+
 
 class TestPlanRunnerPorts(TestPlanRunner):
     """
@@ -922,6 +998,16 @@ class TestPlanRunnerPorts(TestPlanRunner):
         dev_dut = Device(access=DevAccessSerial(address=self.dut_port)) 
         dev_stub = Device(access=DevAccessSerial(address=self.stub_port))
         return dev_dut, dev_stub    
+
+    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
+        """
+        Return direct-mode ports used by this run.
+        The stub port is included only when at least one selected test is multi-device.
+        """
+        ports = [self.dut_port]
+        if any(test.requires_multiple_devs() for test in test_list):
+            ports.append(self.stub_port)
+        return ports
 
 
 class TestPlanRunnerCLI:

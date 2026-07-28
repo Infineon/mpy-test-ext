@@ -10,6 +10,143 @@ import time
 
 from etdevs.devs import Device, DevAccessSerial
 
+
+def _load_test_plan_yaml(test_plan_yaml: str):
+    if not os.path.exists(test_plan_yaml):
+        print(f'error: test plan file "{test_plan_yaml}" does not exist')
+        sys.exit(1)
+
+    try:
+        with open(test_plan_yaml, "r") as f:
+            return yaml.safe_load(f)
+    except:
+        print(f'error: unable to open YAML file "{test_plan_yaml}"')
+        sys.exit(1)
+
+
+def _get_test_plan_entries(test_plan_yaml_data) -> list[dict]:
+    if not isinstance(test_plan_yaml_data, list):
+        print("error: invalid test plan format (expected a list of entries)")
+        sys.exit(1)
+
+    return [
+        entry
+        for entry in test_plan_yaml_data
+        if isinstance(entry, dict) and entry.get("name") is not None and entry.get("test") is not None
+    ]
+
+
+def _get_test_plan_requirements(test_plan_yaml_data) -> list[str]:
+    if not isinstance(test_plan_yaml_data, list):
+        print("error: invalid test plan format (expected a list of entries)")
+        sys.exit(1)
+
+    requirement_keys = ("require", "requires", "deps", "dependencies")
+    requirement_list = next(
+        (
+            value
+            for entry in test_plan_yaml_data
+            if isinstance(entry, dict)
+            for key in requirement_keys
+            if (value := entry.get(key)) is not None
+        ),
+        None,
+    )
+
+    if requirement_list is None:
+        return []
+
+    if not isinstance(requirement_list, list):
+        requirement_list = [requirement_list]
+
+    # Keep order while removing duplicates.
+    return list(
+        dict.fromkeys(
+            requirement_str
+            for requirement in requirement_list
+            if requirement is not None
+            for requirement_str in [str(requirement).strip()]
+            if requirement_str
+        )
+    )
+
+
+class TestPlanDepManager:
+    """
+    Ensure required MicroPython libraries are available on target devices
+    before the test plan runner starts.
+    """
+
+    def __init__(self, mpy_root_dir: str = None):
+        if mpy_root_dir is None:
+            mpy_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        self.mpremote_py = os.path.join(mpy_root_dir, "tools", "mpremote", "mpremote.py")
+        self.completed_requirements = set()
+
+    @staticmethod
+    def get_required_libs(test_plan_file: str) -> list[str]:
+        test_plan_yaml_data = _load_test_plan_yaml(test_plan_file)
+        return _get_test_plan_requirements(test_plan_yaml_data)
+
+    @staticmethod
+    def get_ports_hil(hil_devs_file: str, board: str = None) -> list[str]:
+        ports = []
+        available_devs = Device.load_device_list_from_yml(hil_devs_file)
+        for dev in available_devs:
+            if board is not None and dev.name != board:
+                continue
+            if dev.access:
+                ports.append(dev.access.get_address())
+
+        return [p for p in dict.fromkeys(ports) if p]
+
+    @staticmethod
+    def get_ports_direct(
+        dut_port: str, stub_port: str, test_list: list["TestRunner"]
+    ) -> list[str]:
+        ports = [dut_port]
+        if any(test.requires_multiple_devs() for test in test_list):
+            ports.append(stub_port)
+
+        return [p for p in dict.fromkeys(ports) if p]
+
+    def prepare_ports(self, ports: list[str], required_libs: list[str]) -> int:
+        if not ports or not required_libs:
+            return 0
+
+        for port in ports:
+            for lib_name in required_libs:
+                requirement_key = (port, lib_name)
+                if requirement_key in self.completed_requirements:
+                    continue
+
+                ret_code = self.__ensure_library(port, lib_name)
+                if ret_code != 0:
+                    return ret_code
+
+                self.completed_requirements.add(requirement_key)
+
+        return 0
+
+    def __ensure_library(self, port: str, lib_name: str) -> int:
+        check_cmd = [self.mpremote_py, "connect", port, "exec", f"import {lib_name}"]
+        check_proc = subprocess.run(check_cmd, capture_output=True, text=True)
+        if check_proc.returncode == 0:
+            return 0
+
+        print(f"info: installing {lib_name} on {port}")
+        install_cmd = [self.mpremote_py, "connect", port, "mip", "install", lib_name]
+        install_proc = subprocess.run(install_cmd)
+        if install_proc.returncode != 0:
+            return install_proc.returncode
+
+        verify_proc = subprocess.run(check_cmd, capture_output=True, text=True)
+        if verify_proc.returncode != 0:
+            print(f"error: {lib_name} installation verification failed on {port}")
+            return verify_proc.returncode
+
+        return 0
+
 class TestRunner:
     """
     This class takes care of running the different MicroPython test types.
@@ -152,16 +289,8 @@ class TestRunner:
           post_stub_delay_ms: <Delay after stub is started in milliseconds> # Optional
 
         """
-        if not os.path.exists(test_plan_yaml):
-            print(f'error: test plan file "{test_plan_yaml}" does not exist')
-            sys.exit(1)
-
-        try:
-            with open(test_plan_yaml, "r") as f:
-                test_plan = yaml.safe_load(f)
-        except:
-            print(f'error: unable to open YAML file "{test_plan_yaml}"')
-            sys.exit(1)
+        test_plan_yaml_data = _load_test_plan_yaml(test_plan_yaml)
+        test_plan = _get_test_plan_entries(test_plan_yaml_data)
 
         # TODO: we can add schema validation, which involves
         # defining a schema and using a non built-in library like
@@ -656,7 +785,6 @@ class TestPlanRunner(ABC):
         """
         self.test_plan_file = test_plan_file
         self.logger = TestPlanLogger()
-        self.completed_requirements = set()
 
     def run(self, test_name_list: list[str] = [], max_retries: int = 0) -> int:
         """
@@ -666,9 +794,6 @@ class TestPlanRunner(ABC):
         If there are failed tests after all retries, the script exits with code 1.
         """
         test_list = self.__get_test_list(test_name_list)
-        ret_code = self.__prepare_common_prerequisites(test_list)
-        if ret_code != 0:
-            sys.exit(1)
 
         test_results = TestPlanResults(max_retries)
         pending_retries = True
@@ -734,62 +859,6 @@ class TestPlanRunner(ABC):
                     test_list.append(test)
 
         return test_list
-
-    def __prepare_common_prerequisites(self, test_list: list[TestRunner]) -> int:
-        """
-        Ensure common prerequisites are available on all target ports before test execution.
-        """
-        ports = self.get_prerequisite_ports(test_list)
-        # Keep order but remove duplicates/empties.
-        ports = [p for p in dict.fromkeys(ports) if p]
-
-        if not ports:
-            return 0
-
-        for port in ports:
-            requirement_key = (port, "unittest")
-            if requirement_key in self.completed_requirements:
-                continue
-
-            ret_code = TestPlanRunner.__ensure_unittest(port)
-            if ret_code != 0:
-                return ret_code
-
-            self.completed_requirements.add(requirement_key)
-
-        return 0
-
-    @staticmethod
-    def __ensure_unittest(port: str) -> int:
-        """
-        Install unittest on the device if it is not already available.
-        """
-        mpy_root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        mpremote_py = os.path.join(mpy_root_dir, "tools", "mpremote", "mpremote.py")
-        check_cmd = [mpremote_py, "connect", port, "exec", "import unittest"]
-        check_proc = subprocess.run(check_cmd, capture_output=True, text=True)
-        if check_proc.returncode == 0:
-            return 0
-
-        print(f"info: installing unittest on {port}")
-        install_cmd = [mpremote_py, "connect", port, "mip", "install", "unittest"]
-        install_proc = subprocess.run(install_cmd)
-        if install_proc.returncode != 0:
-            return install_proc.returncode
-
-        verify_proc = subprocess.run(check_cmd, capture_output=True, text=True)
-        if verify_proc.returncode != 0:
-            print(f"error: unittest installation verification failed on {port}")
-            return verify_proc.returncode
-
-        return 0
-
-    @abstractmethod
-    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
-        """
-        Return all target ports that should receive common prerequisites.
-        """
-        return []
 
     @staticmethod
     def __reset_switchable_devs(dut_dev: Device, stub_dev: Device) -> None:
@@ -941,22 +1010,6 @@ class TestPlanRunnerHIL(TestPlanRunner):
 
         return dev_list
 
-    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
-        """
-        Return serial ports for all available devices matching the selected board.
-        """
-        ports = []
-        available_devs = Device.load_device_list_from_yml(self.hil_devs_file)
-        for dev in available_devs:
-            if self.board is not None and dev.name != self.board:
-                continue
-
-            if dev.access:
-                ports.append(dev.access.get_address())
-
-        return ports
-
-
 class TestPlanRunnerPorts(TestPlanRunner):
     """
     This class takes care of running a test plan using direct device ports.
@@ -998,17 +1051,6 @@ class TestPlanRunnerPorts(TestPlanRunner):
         dev_dut = Device(access=DevAccessSerial(address=self.dut_port)) 
         dev_stub = Device(access=DevAccessSerial(address=self.stub_port))
         return dev_dut, dev_stub    
-
-    def get_prerequisite_ports(self, test_list: list[TestRunner]) -> list[str]:
-        """
-        Return direct-mode ports used by this run.
-        The stub port is included only when at least one selected test is multi-device.
-        """
-        ports = [self.dut_port]
-        if any(test.requires_multiple_devs() for test in test_list):
-            ports.append(self.stub_port)
-        return ports
-
 
 class TestPlanRunnerCLI:
     """
@@ -1136,15 +1178,35 @@ def main_run_test_plan():
     """
     test_plan_runner_cli = TestPlanRunnerCLI()
     tpr_args = test_plan_runner_cli.parse()
+    test_plan_list = TestRunner.load_list_from_yaml(tpr_args.test_plan)
+    if tpr_args.test_suite:
+        test_list = []
+        for test_name in tpr_args.test_suite:
+            for test in test_plan_list:
+                if test.name == test_name:
+                    test_list.append(test)
+    else:
+        test_list = test_plan_list
+
+    required_libs = TestPlanDepManager.get_required_libs(tpr_args.test_plan)
+    test_plan_dep_manager = TestPlanDepManager()
 
     # HIL device file based mode
     if tpr_args.hil_devs:
+        prerequisite_ports = TestPlanDepManager.get_ports_hil(tpr_args.hil_devs, tpr_args.board)
         test_plan_runner = TestPlanRunnerHIL(tpr_args.test_plan, tpr_args.hil_devs, tpr_args.board)
     # Direct port passing mode
     elif tpr_args.dut_port:
+        prerequisite_ports = TestPlanDepManager.get_ports_direct(
+            tpr_args.dut_port, tpr_args.stub_port, test_list
+        )
         test_plan_runner = TestPlanRunnerPorts(
             tpr_args.test_plan, tpr_args.dut_port, tpr_args.stub_port
         )
+
+    dep_ret_code = test_plan_dep_manager.prepare_ports(prerequisite_ports, required_libs)
+    if dep_ret_code != 0:
+        sys.exit(1)
 
     test_plan_runner.run(tpr_args.test_suite, tpr_args.max_retries)
 

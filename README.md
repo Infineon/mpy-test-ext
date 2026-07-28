@@ -69,6 +69,10 @@ Test plans are YAML files that define collections of tests to be executed. They 
 ### Basic Test Plan Structure
 
 ```yaml
+- require:  # Optional: libraries to ensure on target devices before running tests
+    - unittest
+    - mqtt
+
 - name: test-name
   type: single  # Optional: single, single_post_delay, multi, multi_stub, custom
   test:
@@ -138,11 +142,17 @@ Test plans are YAML files that define collections of tests to be executed. They 
       - board: CY8CPROTO-063-BLE
 ```
 
-Before tests start, the runner performs a global device preflight and ensures
-`unittest` is available on all target devices participating in the run.
-For each device, the runner checks `import unittest` first and installs
-`unittest` on demand via `mpremote mip install unittest` only if missing.
-This check/install sequence runs at most once per device for a given execution.
+Before tests start, the dependency manager can perform a global device preflight
+based on optional dependency keys in the test-plan YAML.
+
+Supported keys are: require, requires, deps, and dependencies.
+
+For each required library and each participating device, it first checks
+"import <library>" and installs the library via mpremote mip install only if
+the import check fails. This check/install sequence runs at most once per
+library per device for a given execution.
+
+If no dependency key is provided in YAML, dependency installation is skipped.
 
 ### HIL Device Configuration
 
